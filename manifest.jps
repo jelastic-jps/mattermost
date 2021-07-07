@@ -26,30 +26,35 @@ nodes:
     diskLimit: 20G
 
 onInstall:
-  - script: "return {result: 0, password: '${fn.password(4)}'.toUpperCase() + '${fn.password(4)}'.toLowerCase() + '${fn.random(10)}' + '~!@#$%^&*()'['${fn.random(10)}'] };"
+  - generatePassword
+  - createDB
+  - configureMattermost
+
+onAfterRedeployContainer [cp]: configureMattermost
+
+actions:
+  generatePassword:
+    - script: "return {result: 0, password: '${fn.password(4)}'.toUpperCase() + '${fn.password(4)}'.toLowerCase() + '${fn.random(10)}' + '~!@#$%^&*()'['${fn.random(10)}'] };"
+    - setGlobals:
+        ADMIN_PASS: ${response.password}
+   
+  createDB:
+    - cmd[sqldb]:
+       - jem passwd set -p "${globals.PG_PASSWORD}"
+       - export PGPASSWORD='${globals.PG_PASSWORD}'; psql -U webadmin -d postgres -c "SELECT 1 FROM pg_database WHERE datname = 'mattermost'" | grep -q 1 || psql -U webadmin -d postgres -c "CREATE DATABASE mattermost;"
+      user: root
   
-  - setGlobals:
-      ADMIN_PASS: ${response.password}
-
+  configureMattermost:
   - log: PostgreSQL password configuration
-  - cmd[sqldb]:
-     - jem passwd set -p "${globals.PG_PASSWORD}"
-     - export PGPASSWORD='${globals.PG_PASSWORD}'; psql -U webadmin -d postgres -c "CREATE DATABASE mattermost;"
-    user: root
-
   - cmd[cp]: |-
       setcap cap_net_bind_service=+ep /mattermost/bin/mattermost
       sed -i  -e 's/mmuser:mostest/webadmin:${globals.PG_PASSWORD}/g'  -e  's|"SiteURL": \"\",|"SiteURL": "'${env.url}'",|g'  -e  's|localhost/mattermost_test|sqldb:5432/mattermost|g' -e  's/charset=utf8mb4,utf8&readTimeout=30s&writeTimeout=30s/sslmode=disable&connect_timeout=10/g'  -e  's|"ListenAddress": ":8000",|"ListenAddress": ":80",|g' /mattermost/config/config.json
-    
   - restartContainers [cp]
-    
   - cmd[cp]: |-
       timeout 300 bash -c 'while [[ "$(curl -I http://localhost -s -o /dev/null -w ''%{http_code}'')" != "405" ]]; do sleep 3; done'
       EMAIL="${user.email}" && EMAIL=${EMAIL%%@*} && echo ${EMAIL%%+*}
-    
   - setGlobals:
       username: ${response.out}
-    
   - cmd[cp]: |-
       mattermost user create --firstname ${globals.username} --system_admin --email ${user.email} --username ${globals.username} --password '${globals.ADMIN_PASS}'
 
