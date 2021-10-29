@@ -42,7 +42,7 @@ onAfterRedeployContainer [cp]: configureMattermost
 actions:
   deployApp:
     - deploy:
-        archive: https://releases.mattermost.com/6.0.2/mattermost-${globals.version_mattermost}-linux-amd64.tar.gz
+        archive: https://releases.mattermost.com/${globals.version_mattermost}/mattermost-${globals.version_mattermost}-linux-amd64.tar.gz
         context: ROOT
         name: mattermost-${globals.version_mattermost}-linux-amd64.tar.gz
     - cmd [cp]: mkdir /opt/mattermost; mkdir /opt/mattermost/data; cd /opt/mattermost; ln -s /var/www/webroot/ROOT/* .
