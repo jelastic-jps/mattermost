@@ -2,37 +2,28 @@ type: install
 name: Mattermost Chat Service
 version: 1.7
 id: mattermost
-
 categories: ["apps/dev-and-admin-tools", "apps/popular", "apps/collaboration"]
-
 displayName: Mattermost
 homepage: https://mattermost.com/
-logo: images/mattermost-logo-small.png
+logo: https://github.com/jelastic-jps/mattermost/raw/master/images/mattermost-logo-small.png
 description: Mattermost is an open-source, self-hostable online chat service with file sharing, search, and integrations. It is designed as an internal chat for organisations and companies, and mostly markets itself as an open-source alternative to Slack.
 ssl: true
 
-baseUrl: https://raw.githubusercontent.com/jelastic-jps/mattermost/master
-
 nodes:
-  - nodeType: nginxphp
+  - image: mattermost/mattermost-team-edition:release-6.2
     nodeGroup: cp
     cloudlets: 16
+    skipNodeEmails: true
     diskLimit: 50G
+    env:
+      JELASTIC_EXPOSE: 8065
 
   - nodeType: postgresql
     nodeGroup: sqldb
     cloudlets: 16
     diskLimit: 20G
 
-globals:
-  config: /opt/mattermost/config/config.json
-  
-mixins:
- - configs/vers.yaml
-
 onInstall:
-  - deployApp
-  - manageMattermostUser
   - generatePassword
   - createDB
   - configureMattermost
@@ -40,25 +31,8 @@ onInstall:
 onAfterRedeployContainer [cp]: configureMattermost
 
 actions:
-  deployApp:
-    - deploy:
-        archive: https://releases.mattermost.com/${globals.version_mattermost}/mattermost-${globals.version_mattermost}-linux-amd64.tar.gz
-        context: ROOT
-        name: mattermost-${globals.version_mattermost}-linux-amd64.tar.gz
-    - cmd [cp]: mkdir /opt/mattermost; mkdir /opt/mattermost/data; cd /opt/mattermost; ln -s /var/www/webroot/ROOT/* .
-      user: root
-
-  manageMattermostUser:
-    cmd [cp]: |-
-      useradd --system --user-group mattermost
-      chown -R mattermost:mattermost /opt/mattermost
-      chown -R mattermost:mattermost /var/www/webroot/ROOT
-      chmod -R g+w /opt/mattermost
-      restorecon -R /opt/mattermost
-    user: root
-      
   generatePassword:
-    - script: "return {result: 0, password: '${fn.password(5)}'.toUpperCase() + '~!@#$%^&*()'['${fn.random(10)}'] + '${fn.password(5)}'.toLowerCase() + '${fn.random(10)}' };"
+    - script: "return {result: 0, password: '${fn.password(4)}'.toUpperCase() + '${fn.password(4)}'.toLowerCase() + '${fn.random(10)}' + '~!@#$%^&*()'['${fn.random(10)}'] };"
     - setGlobals:
         ADMIN_PASS: ${response.password}
         PG_PASSWORD: ${nodes.sqldb.password}
@@ -72,26 +46,16 @@ actions:
   configureMattermost:
   - log: PostgreSQL password configuration
   - cmd[cp]: |-
-      setcap cap_net_bind_service=+ep /opt/mattermost/bin/mattermost
-      sed -i  -e 's/mmuser:mostest/webadmin:${globals.PG_PASSWORD}/g'  -e  's|"SiteURL": \"\",|"SiteURL": "'${env.url}'",|g'  -e  's|localhost/mattermost_test|sqldb:5432/mattermost|g' -e  's/charset=utf8mb4,utf8&readTimeout=30s&writeTimeout=30s/sslmode=disable&connect_timeout=10/g'  -e  's|"ListenAddress": ":8000",|"ListenAddress": ":80",|g' ${globals.config}
-      sed -i 's|"EnableLocalMode": .*|"EnableLocalMode": true,|g' ${globals.config}
-      sed -i 's|index  index.html index.htm index.php;|index  index.html index.htm index.php;\n\n    proxy_pass http://localhost:8065/;|g' /etc/nginx/conf.d/sites-enabled/default.conf
-    user: root
+      setcap cap_net_bind_service=+ep /mattermost/bin/mattermost
+      sed -i  -e 's/mmuser:mostest/webadmin:${globals.PG_PASSWORD}/g'  -e  's|"SiteURL": \"\",|"SiteURL": "'${env.url}'",|g'  -e  's|localhost/mattermost_test|sqldb:5432/mattermost|g' -e  's/charset=utf8mb4,utf8&readTimeout=30s&writeTimeout=30s/sslmode=disable&connect_timeout=10/g' -e  's|"ListenAddress": ":8000",|"ListenAddress": ":8080",|g' -e 's|"EnableLocalMode": false,|"EnableLocalMode": true,|g' /mattermost/config/config.json
   - restartContainers [cp]
   - cmd[cp]: |-
-      sudo curl -fsSL "${baseUrl}/configs/mattermost.service" -o /etc/systemd/system/mattermost.service
-      chmod 644 /etc/systemd/system/mattermost.service
-      systemctl daemon-reload
-      systemctl enable mattermost
-      systemctl start mattermost
+      timeout 300 bash -c 'while [[ "$(curl -I http://localhost -s -o /dev/null -w ''%{http_code}'')" != "405" ]]; do sleep 3; done'
       EMAIL="${user.email}" && EMAIL=${EMAIL%%@*} && echo ${EMAIL%%+*}
-    user: root
   - setGlobals:
       username: ${response.out}
   - cmd[cp]: |-
-      while [ ! -S /var/tmp/mattermost_local.socket ]; do sleep 3; done
-      /opt/mattermost/bin/mmctl user create --firstname ${globals.username} --system-admin --email ${user.email} --username ${globals.username} --password '${globals.ADMIN_PASS}' --local
-    user: root
+      mmctl user create --firstname ${globals.username} --system-admin --email ${user.email} --username ${globals.username} --password '${globals.ADMIN_PASS}' --local
 
 success: |
   ### Mattermost is ready
